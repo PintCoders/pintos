@@ -22,11 +22,20 @@ struct lock
   {
     struct thread *holder;      /* Thread holding lock (for debugging). */
     struct semaphore semaphore; /* Binary semaphore controlling access. */
+		struct list *poolThread;
+		struct list_elem elem; 
+
+		// origin_priority and is_donated
+		int origin_pri;							/* original priority use for donate*/
+		int donated_pri;						/* priority which is already donated*/
+
   };
 
 void lock_init (struct lock *);
 void lock_acquire (struct lock *);
+void donateRecursive(struct lock *, int, int);
 bool lock_try_acquire (struct lock *);
+bool lock_sort (const struct list_elem*, const struct list_elem *, void *);
 void lock_release (struct lock *);
 bool lock_held_by_current_thread (const struct lock *);
 

@@ -86,4 +86,6 @@ vtop (const void *vaddr)
   return (uintptr_t) vaddr - (uintptr_t) PHYS_BASE;
 }
 
+// Choi's Implementation
+
 #endif /* threads/vaddr.h */

@@ -79,6 +79,7 @@ b_thread_func (void *lock_)
 
   lock_acquire (lock);
   msg ("Thread b acquired lock b.");
+	//msg ("Priority %i", thread_get_priority());
   lock_release (lock);
   msg ("Thread b finished.");
 }

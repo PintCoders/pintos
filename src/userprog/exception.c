@@ -1,15 +1,28 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
+#include <debug.h>
 #include "userprog/gdt.h"
+#include "userprog/syscall.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+
+#include "vm/virtualMemory.h"
+#include "threads/palloc.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "userprog/process.h"
+#include "userprog/pagedir.h"
+#include <string.h>
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+static bool install_page_exception (void *, void *, bool);
+static bool load_page_file (struct page*);
+static bool load_page_mmf (struct page*);
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -127,6 +140,10 @@ page_fault (struct intr_frame *f)
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
 
+	struct thread *t;
+	struct page *pg;
+	struct frame *fr;
+
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
      data.  It is not necessarily the address of the instruction
@@ -146,16 +163,130 @@ page_fault (struct intr_frame *f)
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
-  user = (f->error_code & PF_U) != 0;
+	user = (f->error_code & PF_U) != 0;
+	
+	t = thread_current ();
+	pg = pageTable_find (pg_round_down (fault_addr));
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  kill (f);
+	//if it is not valid
+	if (!not_present || !is_user_vaddr (fault_addr) || fault_addr == NULL) {
+		exit(-1);
+
+	// if we dont have that page
+	} else if (pg == NULL) {
+			if (fault_addr >= (f->esp - 32) && (PHYS_BASE - pg_round_down (fault_addr)) <= STACK_SIZE ) {
+				if (NULL != (fr = frameTable_alloc ()))
+					pagedir_set_page (t->pagedir, pg_round_down (fault_addr), fr->kaddr, true);	
+				else
+					printf("PAGE FAULT COULNT ALLOC\n");
+
+			} else {
+				exit(-1);
+			}	
+	// if it is swapped
+	} else if ((pg->status & swapped) && not_present)	{
+		swap_in (pg);
+
+	// if need to be loaded by lazy loading
+	} else if (pg->type == file_page && pg->status != loaded) {
+		if (!load_page_file (pg))
+			exit(-1);
+
+	// if need tobe loaded by lazy loading of mmap
+	} else if (pg->type == mmf_page && pg->status != loaded) { 
+		if (!load_page_mmf (pg))
+			exit(-1);
+	} else if (pg->type == mmf_page && pg->status & loaded) { 
+		exit(-1);
+ 	}else {
+
+	/* To implement virtual memory, delete the rest of the function
+		 body, and replace it with code that brings in the page to
+		 which fault_addr refers. */
+	printf ("Page fault at %p: %s error %s page in %s context.\n",
+			fault_addr,
+			not_present ? "not present" : "rights violation",
+			write ? "writing" : "reading",
+			user ? "user" : "kernel");
+	debug_backtrace();
+	kill (f);
+	}
 }
 
+/*
+		I copied this function from process.c because its needed
+		by stack growth
+*/
+static bool
+install_page_exception (void *upage, void *kpage, bool writable)
+{
+	struct thread *t = thread_current ();
+
+	/* Verify that there's not already a page at that virtual
+		 address, then map our page there. */
+	return (pagedir_get_page (t->pagedir, upage) == NULL
+			&& pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/*
+	It is needed by lazy loading, it will allocate a kernel page
+	set like writable and load into the given page, also it will
+	read the segment of the program and store in the given page 
+*/
+bool
+load_page_file (struct page *p)
+{
+	uint8_t *kpage;
+
+	p->file = file_reopen (p->file);
+	file_seek (p->file, p->ofs);
+	p->frame = frameTable_alloc ();
+
+	if (NULL == (kpage = p->frame->kaddr))
+		return false;
+
+	if (file_read (p->file, kpage, p->read_bytes) != (int) p->read_bytes) {
+		frameTable_free (p->frame);
+		return false;
+	}
+
+	memset (kpage + p->read_bytes, 0, p->zero_bytes);
+
+	if (!install_page_exception (p->uaddr, kpage, p->writable)) {
+		frameTable_free (p->frame);
+		return false;
+	}
+	p->status = loaded;
+	return true;
+}
+
+/*
+	Same that the above function but for mmap
+*/
+bool
+load_page_mmf (struct page *p)
+{
+	uint8_t *kpage;
+
+	p->file = file_reopen (p->file);
+	file_seek (p->file, p->ofs);
+	p->frame = frameTable_alloc ();
+
+	if (NULL == (kpage = p->frame->kaddr))
+		return false;
+
+	if (file_read (p->file, kpage, p->read_bytes) != (int) p->read_bytes) {
+		frameTable_free (p->frame);
+		return false;
+	}
+
+	memset (kpage + p->read_bytes, 0, p->zero_bytes);
+
+	if (!install_page_exception (p->uaddr, kpage, true)) {
+		frameTable_free (p->frame);
+		return false;
+	}
+	p->status = loaded;
+	p->writted = true;
+	return true;
+}

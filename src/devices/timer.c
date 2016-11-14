@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
+#include <list.h>
 #include "devices/pit.h"
 #include "threads/interrupt.h"
 #include "threads/synch.h"
@@ -30,6 +31,15 @@ static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 
+// edited by choi
+static struct list sleep_list;
+
+static bool comp_tick (const struct list_elem *a,
+											 const struct list_elem *b,
+											 void *aux);
+
+static void timer_wakeup (void);
+
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -37,6 +47,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+	list_init (&sleep_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -86,16 +97,46 @@ timer_elapsed (int64_t then)
 
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
+//edite by choi
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
-
+//	int64_t start = timer_ticks ();
+	enum intr_level old_level;
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+	thread_current ()->t_ticks = timer_ticks () + ticks;
+
+	old_level = intr_disable();
+	list_insert_ordered (&sleep_list, &thread_current ()->elem,
+											 &comp_tick, NULL);
+	thread_block ();
+	intr_set_level (old_level);
+//	while(timer_elapsed (start) > ticks)
+//			thread_yield();
 }
 
+static bool
+comp_tick (const struct list_elem *a, const struct list_elem *b,
+					 void *aux UNUSED)
+{
+	struct thread *x = list_entry (a, struct thread, elem);
+	struct thread *y = list_entry (b, struct thread, elem);
+	return x->t_ticks < y->t_ticks;
+}
+
+static void
+timer_wakeup(void)
+{
+	struct thread *sleeping_thread UNUSED;
+
+	while (!list_empty (&sleep_list)&& 
+					list_entry (list_front (&sleep_list), 
+					struct thread, elem)->t_ticks <= timer_ticks ())
+		{
+			thread_unblock (list_entry (list_pop_front (&sleep_list), struct thread, elem));
+		}
+}
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
    turned on. */
 void
@@ -171,6 +212,7 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+	timer_wakeup ();
   thread_tick ();
 }
 

@@ -4,6 +4,9 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include <hash.h>
+#include "threads/synch.h"
+#include "vm/virtualMemory.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +26,11 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+#define STACK_SIZE (8*(1 << 20))
+#ifdef USERPROG
+#define DEAD -2000
+#endif
 
 /* A kernel thread or user process.
 
@@ -88,14 +96,47 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int priority_original;              /* Original Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
+		
+		//choi
+		int64_t t_ticks;
+
+		//Implements by Vicente Bolea
+		struct lock *lock_waiting; 					/*The lock which block this thread */
+		struct lock *lock_owner;						/*The lock which belong to this thread */
+		struct list poolThread;             /*Threads which donate the priority to it*/
+		bool lock_to_be_open;               /*If the lock has to release any lock*/
+		//END implements by Vicente Bolea
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
 #ifdef USERPROG
+
     /* Owned by userprog/process.c. */
-    uint32_t *pagedir;                  /* Page directory. */
+    uint32_t *pagedir;                  /* Page directory entry ( PAGE TABLE ). */
+
+		//For files
+		struct list files;
+		struct file *temp_file;
+		char file_name[16];
+
+		//For childrens
+		int child_status;
+		struct list children;
+		
+		//For parent
+		struct semaphore my_sema;
+		struct thread *parent;
+		struct list_elem child_elem;
+		bool is_exit;
+			
+#endif
+
+#ifdef VM
+		struct hash pageTable;  // PAge Table
+		void* mmf;	// Point to the last mmap 
 #endif
 
     /* Owned by thread.c. */
@@ -138,4 +179,12 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+//edited by choi
+bool comp_priority (const struct list_elem *, const struct list_elem *, void *aux);
+
+//edited by Vicente
+void sort_readyList(void);
+bool is_thread_highest(void);
+
+struct thread *tid_to_thread (tid_t);
 #endif /* threads/thread.h */

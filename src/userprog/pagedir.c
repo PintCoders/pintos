@@ -5,6 +5,7 @@
 #include "threads/init.h"
 #include "threads/pte.h"
 #include "threads/palloc.h"
+#include "vm/virtualMemory.h"
 
 static uint32_t *active_pd (void);
 static void invalidate_pagedir (uint32_t *);
@@ -85,6 +86,14 @@ lookup_page (uint32_t *pd, const void *vaddr, bool create)
   return &pt[pt_no (vaddr)];
 }
 
+//bool
+//pagedir_set_page2 (uint32_t *pd, void *upage, void *kpage, bool writable, struct frame* f)
+//{
+	//pagedir_set_page (pd, upage, kpage, writable);
+  //pte = lookup_page (pd, upage, true);
+	//f->page = pte;
+	//
+//}
 /* Adds a mapping in page directory PD from user virtual page
    UPAGE to the physical frame identified by kernel virtual
    address KPAGE.
@@ -99,6 +108,7 @@ bool
 pagedir_set_page (uint32_t *pd, void *upage, void *kpage, bool writable)
 {
   uint32_t *pte;
+	struct frame* f;
 
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (pg_ofs (kpage) == 0);
@@ -112,6 +122,10 @@ pagedir_set_page (uint32_t *pd, void *upage, void *kpage, bool writable)
     {
       ASSERT ((*pte & PTE_P) == 0);
       *pte = pte_create_user (kpage, writable);
+			f = frameTable_find_by_kaddr (kpage);
+			f->page = pte;
+			f->uaddr = upage;
+		
       return true;
     }
   else

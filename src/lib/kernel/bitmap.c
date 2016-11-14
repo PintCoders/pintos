@@ -185,7 +185,9 @@ bitmap_reset (struct bitmap *b, size_t bit_idx)
 void
 bitmap_flip (struct bitmap *b, size_t bit_idx) 
 {
+	//ASSERT(b!=NULL);
   size_t idx = elem_idx (bit_idx);
+	//printf("FLIP: B: %p size: %p\n", b, &b->bits[idx]); 
   elem_type mask = bit_mask (bit_idx);
 
   /* This is equivalent to `b->bits[idx] ^= mask' except that it
